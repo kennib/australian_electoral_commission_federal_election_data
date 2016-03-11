@@ -28,7 +28,7 @@ def extract_data(file, id):
 			data = {'id': elections['id'], 'name': elections['name']}
 			data.update(election)
 			print(data)
-			scraperwiki.sqlite.save(unique_keys=['id', 'category'], data=data)
+			#scraperwiki.sqlite.save(unique_keys=['id', 'category'], data=data)
 
 # This function gets the "media feed" XML from its zip file
 def unzip_xml(file, id):
@@ -49,6 +49,7 @@ def elections_data(xml):
 	election_name = event.find('eml:EventName', NS).text
 	elections = xml.xpath('.//aec:Election', namespaces=NS)
 	elections_data = [election_data(election) for election in elections]
+
 	return {'id': election_id, 'name': election_name, 'elections': elections_data}
 
 # This function takes an lxml object and returns election (House of Reps. or Senate) data
@@ -56,7 +57,57 @@ def election_data(xml):
 	election = xml.find('eml:ElectionIdentifier', NS)
 	name = election.find('eml:ElectionName', NS).text
 	category = election.find('eml:ElectionCategory', NS).text
-	return {'name': name, 'category': category}
+	contests = xml.xpath('.//aec:Contest', namespaces=NS)
+	contests_data = [contest_data(contest) for contest in contests]
+
+	return {'name': name, 'category': category, 'contests': contest_data}
+
+# This function takes an lxml object and returns contest (e.g., a single electorate's election) data
+def contest_data(xml):
+	contest = xml.find('eml:ContestIdentifier', NS)
+	id = contest.get('Id')
+	name = contest.find('eml:ContestName', NS).text
+	enrolment = int(xml.find('aec:Enrolment', NS).text)
+
+	first_preferences = xml.find('aec:FirstPreferences', NS)
+	candidates = first_preferences.xpath('.//aec:Candidate', namespaces=NS)
+	candidates_data = [candidate_data(candidate) for candidate in candidates]
+
+	return {'id': id, 'name': name, 'enrolment': enrolment, 'candidates': candidates_data}
+
+# This function takes an lxml object and returns candidate data
+def candidate_data(xml):
+	candidate = xml.find('eml:CandidateIdentifier', NS)
+	id = candidate.get('Id')
+	name = candidate.find('eml:CandidateName', NS).text
+
+	elected = boolean_text(xml.find('aec:Elected', NS).text)
+	incumbent = boolean_text(xml.find('aec:Elected', NS).text)
+	votes = int(xml.find('aec:Votes', NS).text)
+
+	party = party_data(xml)
+
+	return {'id': id, 'name': name, 'elected': elected, 'incumbent': incumbent, 'first_preferences': votes, 'party': party}
+
+# This function takes an lxml object and returns party data
+def party_data(xml):
+	party = xml.find('eml:AffiliationIdentifier', NS)
+
+	if party is not None:
+		id = party.get('Id')
+		code = party.get('ShortCode')
+		name = party.find('eml:RegisteredName', NS).text
+		
+		return {'id': id, 'code': code, 'name': name}
+
+# this function turns a 'true' or 'false' string into a boolean
+def boolean_text(string):
+	if string == 'true':
+		return True
+	elif string == 'false':
+		return False
+	else:
+		return None
 
 if __name__ == '__main__':
 	# Load up the FTP service
