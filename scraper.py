@@ -9,6 +9,7 @@ import urllib
 import io
 
 FTP_URL = 'results.aec.gov.au'
+FTP_TIMEOUT = 30
 NS = {
 	'aec': 'http://www.aec.gov.au/xml/schema/mediafeed',
 	'eml': 'urn:oasis:names:tc:evs:schema:eml'
@@ -22,13 +23,6 @@ def extract_data(file, id):
 
 		# Read in the data from the XML
 		elections = elections_data(read_xml(xml))
-
-		# Write out to the sqlite database using scraperwiki library
-		for election in elections['elections']:
-			data = {'id': elections['id'], 'name': elections['name']}
-			data.update(election)
-			print(data)
-			#scraperwiki.sqlite.save(unique_keys=['id', 'category'], data=data)
 
 # This function gets the "media feed" XML from its zip file
 def unzip_xml(file, id):
@@ -45,25 +39,34 @@ def read_xml(file):
 def elections_data(xml):
 	results = xml.find('aec:Results', NS)
 	event = results.find('eml:EventIdentifier', NS)
-	election_id = event.get('Id')
-	election_name = event.find('eml:EventName', NS).text
+	id = event.get('Id')
+	name = event.find('eml:EventName', NS).text
 	elections = xml.xpath('.//aec:Election', namespaces=NS)
-	elections_data = [election_data(election) for election in elections]
+	elections_data = [election_data(election, id) for election in elections]
 
-	return {'id': election_id, 'name': election_name, 'elections': elections_data}
+	scraperwiki.sqlite.save(table_name='event',
+		unique_keys=['id', 'name'],
+		data={'id': id, 'name': name})
+
+	return {'id': id, 'name': name, 'elections': elections_data}
 
 # This function takes an lxml object and returns election (House of Reps. or Senate) data
-def election_data(xml):
+def election_data(xml, event_id):
 	election = xml.find('eml:ElectionIdentifier', NS)
+	id = election.get('Id')
 	name = election.find('eml:ElectionName', NS).text
 	category = election.find('eml:ElectionCategory', NS).text
 	contests = xml.xpath('.//aec:Contest', namespaces=NS)
-	contests_data = [contest_data(contest) for contest in contests]
+	contests_data = [contest_data(contest, event_id, id) for contest in contests]
 
-	return {'name': name, 'category': category, 'contests': contest_data}
+	scraperwiki.sqlite.save(table_name='election',
+		unique_keys=['event_id', 'id'],
+		data={'event_id': event_id, 'id': id, 'name': name, 'cetegory': category})
+
+	return {'id': id, 'name': name, 'category': category, 'contests': contest_data}
 
 # This function takes an lxml object and returns contest (e.g., a single electorate's election) data
-def contest_data(xml):
+def contest_data(xml, event_id, election_id):
 	contest = xml.find('eml:ContestIdentifier', NS)
 	id = contest.get('Id')
 	name = contest.find('eml:ContestName', NS).text
@@ -71,12 +74,16 @@ def contest_data(xml):
 
 	first_preferences = xml.find('aec:FirstPreferences', NS)
 	candidates = first_preferences.xpath('.//aec:Candidate', namespaces=NS)
-	candidates_data = [candidate_data(candidate) for candidate in candidates]
+	candidates_data = [candidate_data(candidate, event_id, election_id, id) for candidate in candidates]
+
+	scraperwiki.sqlite.save(table_name='contest',
+		unique_keys=['event_id', 'election_id', 'id'],
+		data={'event_id': event_id, 'election_id': election_id, 'id': id, 'name': name, 'enrolment': enrolment})
 
 	return {'id': id, 'name': name, 'enrolment': enrolment, 'candidates': candidates_data}
 
 # This function takes an lxml object and returns candidate data
-def candidate_data(xml):
+def candidate_data(xml, event_id, election_id, contest_id):
 	candidate = xml.find('eml:CandidateIdentifier', NS)
 	id = candidate.get('Id')
 	name = candidate.find('eml:CandidateName', NS).text
@@ -86,6 +93,15 @@ def candidate_data(xml):
 	votes = int(xml.find('aec:Votes', NS).text)
 
 	party = party_data(xml)
+
+	scraperwiki.sqlite.save(table_name='candidate',
+		unique_keys=['id'],
+		data={'id': id, 'name': name})
+
+	scraperwiki.sqlite.save(table_name='first_preferences',
+		unique_keys=['event_id', 'election_id', 'contest_id', 'candidate_id'],
+		data={'event_id': event_id, 'election_id': election_id, 'contest_id': contest_id, 'candidate_id': id, 'party_id': party.get('id'),
+			'elected': elected, 'incumbent':  incumbent, 'votes': votes})
 
 	return {'id': id, 'name': name, 'elected': elected, 'incumbent': incumbent, 'first_preferences': votes, 'party': party}
 
@@ -97,8 +113,15 @@ def party_data(xml):
 		id = party.get('Id')
 		code = party.get('ShortCode')
 		name = party.find('eml:RegisteredName', NS).text
+
+		scraperwiki.sqlite.save(table_name='party',
+			unique_keys=['id'],
+			data={'id': id, 'code': code, 'name': name})
 		
 		return {'id': id, 'code': code, 'name': name}
+	
+	else:
+		return {}
 
 # this function turns a 'true' or 'false' string into a boolean
 def boolean_text(string):
@@ -111,7 +134,7 @@ def boolean_text(string):
 
 if __name__ == '__main__':
 	# Load up the FTP service
-	ftp = FTP(FTP_URL)
+	ftp = FTP(FTP_URL, timeout=FTP_TIMEOUT)
 	ftp.login()
 
 	# Get the list of elections with data
