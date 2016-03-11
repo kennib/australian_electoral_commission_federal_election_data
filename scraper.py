@@ -150,6 +150,6 @@ if __name__ == '__main__':
 
 		if files:
 			# Download the latest file and extract the data
-			latest_file = files[0]
+			latest_file = files[-1]
 			sock = urllib.urlopen('ftp://{url}{path}/{file}'.format(url=FTP_URL, path=path, file=latest_file))
 			extract_data(io.BytesIO(sock.read()), election_id)
