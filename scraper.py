@@ -72,9 +72,16 @@ def contest_data(xml, event_id, election_id):
 	name = contest.find('eml:ContestName', NS).text
 	enrolment = int(xml.find('aec:Enrolment', NS).text)
 
+	# First preference data
 	first_preferences = xml.find('aec:FirstPreferences', NS)
 	candidates = first_preferences.xpath('.//aec:Candidate', namespaces=NS)
-	candidates_data = [candidate_data(candidate, event_id, election_id, id) for candidate in candidates]
+	candidates_data = [candidate_data(candidate, event_id, election_id, id, 'first_preferences') for candidate in candidates]
+
+	# Two candidate preference data
+	two_candidate_preferred = xml.find('aec:TwoCandidatePreferred', NS)
+	if two_candidate_preferred is not None:
+		candidates = two_candidate_preferred.xpath('.//aec:Candidate', namespaces=NS)
+		candidates_data = [candidate_data(candidate, event_id, election_id, id, 'two_candidate_preferred') for candidate in candidates]
 
 	scraperwiki.sqlite.save(table_name='contest',
 		unique_keys=['event_id', 'election_id', 'id'],
@@ -83,7 +90,7 @@ def contest_data(xml, event_id, election_id):
 	return {'id': id, 'name': name, 'enrolment': enrolment, 'candidates': candidates_data}
 
 # This function takes an lxml object and returns candidate data
-def candidate_data(xml, event_id, election_id, contest_id):
+def candidate_data(xml, event_id, election_id, contest_id, kind):
 	candidate = xml.find('eml:CandidateIdentifier', NS)
 	id = candidate.get('Id')
 	name = candidate.find('eml:CandidateName', NS).text
@@ -98,7 +105,7 @@ def candidate_data(xml, event_id, election_id, contest_id):
 		unique_keys=['id'],
 		data={'id': id, 'name': name})
 
-	scraperwiki.sqlite.save(table_name='first_preferences',
+	scraperwiki.sqlite.save(table_name=kind,
 		unique_keys=['event_id', 'election_id', 'contest_id', 'candidate_id'],
 		data={'event_id': event_id, 'election_id': election_id, 'contest_id': contest_id, 'candidate_id': id, 'party_id': party.get('id'),
 			'elected': elected, 'incumbent':  incumbent, 'votes': votes})
