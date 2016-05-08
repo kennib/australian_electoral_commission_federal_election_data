@@ -61,7 +61,7 @@ def election_data(xml, event_id):
 
 	scraperwiki.sqlite.save(table_name='election',
 		unique_keys=['event_id', 'id'],
-		data={'event_id': event_id, 'id': id, 'name': name, 'cetegory': category})
+		data={'event_id': event_id, 'id': id, 'name': name, 'category': category})
 
 	return {'id': id, 'name': name, 'category': category, 'contests': contest_data}
 
