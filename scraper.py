@@ -17,12 +17,17 @@ NS = {
 
 # This function reads in data from the "media feed" XML
 # then extracts the data and writes it to the database
-def extract_data(file, id):
+def extract_data(name, file, id):
 		# Get the XML file from the zip data
 		xml = unzip_xml(file, id)
 
 		# Read in the data from the XML
 		elections = elections_data(read_xml(xml))
+
+		# Remember that this file has been read
+		scraperwiki.sqlite.save(table_name='files',
+			unique_keys=['id', 'file'],
+			data={'id': id, 'file': name})
 
 # This function gets the "media feed" XML from its zip file
 def unzip_xml(file, id):
@@ -74,14 +79,16 @@ def contest_data(xml, event_id, election_id):
 
 	# First preference data
 	first_preferences = xml.find('aec:FirstPreferences', NS)
+	updated = first_preferences.get('Updated')
 	candidates = first_preferences.xpath('.//aec:Candidate', namespaces=NS)
-	candidates_data = [candidate_data(candidate, event_id, election_id, id, 'first_preferences') for candidate in candidates]
+	candidates_data = [candidate_data(candidate, updated, event_id, election_id, id, 'first_preferences') for candidate in candidates]
 
 	# Two candidate preference data
 	two_candidate_preferred = xml.find('aec:TwoCandidatePreferred', NS)
 	if two_candidate_preferred is not None:
+		updated = two_candidate_preferred.get('Updated')
 		candidates = two_candidate_preferred.xpath('.//aec:Candidate', namespaces=NS)
-		candidates_data = [candidate_data(candidate, event_id, election_id, id, 'two_candidate_preferred') for candidate in candidates]
+		candidates_data = [candidate_data(candidate, updated, event_id, election_id, id, 'two_candidate_preferred') for candidate in candidates]
 
 	scraperwiki.sqlite.save(table_name='contest',
 		unique_keys=['event_id', 'election_id', 'id'],
@@ -90,7 +97,7 @@ def contest_data(xml, event_id, election_id):
 	return {'id': id, 'name': name, 'enrolment': enrolment, 'candidates': candidates_data}
 
 # This function takes an lxml object and returns candidate data
-def candidate_data(xml, event_id, election_id, contest_id, kind):
+def candidate_data(xml, updated, event_id, election_id, contest_id, kind):
 	candidate = xml.find('eml:CandidateIdentifier', NS)
 	id = candidate.get('Id')
 	name = candidate.find('eml:CandidateName', NS).text
@@ -106,11 +113,11 @@ def candidate_data(xml, event_id, election_id, contest_id, kind):
 		data={'id': id, 'name': name})
 
 	scraperwiki.sqlite.save(table_name=kind,
-		unique_keys=['event_id', 'election_id', 'contest_id', 'candidate_id'],
-		data={'event_id': event_id, 'election_id': election_id, 'contest_id': contest_id, 'candidate_id': id, 'party_id': party.get('id'),
+		unique_keys=['event_id', 'election_id', 'contest_id', 'candidate_id', 'updated'],
+		data={'updated': updated, 'event_id': event_id, 'election_id': election_id, 'contest_id': contest_id, 'candidate_id': id, 'party_id': party.get('id'),
 			'elected': elected, 'incumbent':  incumbent, 'votes': votes})
 
-	return {'id': id, 'name': name, 'elected': elected, 'incumbent': incumbent, 'first_preferences': votes, 'party': party}
+	return {'id': id, 'updated': updated, 'name': name, 'elected': elected, 'incumbent': incumbent, 'first_preferences': votes, 'party': party}
 
 # This function takes an lxml object and returns party data
 def party_data(xml):
@@ -155,8 +162,12 @@ if __name__ == '__main__':
 		# Get the files ordered by time
 		files = ftp.nlst('-t')
 
-		if files:
-			# Download the latest file and extract the data
-			latest_file = files[-1]
+		# Download the files (newest first) and extract the data
+		for latest_file in files[-250::50]:
+			# Skip the file if we've read it before
+			files_table = 'files' in scraperwiki.sql.show_tables()
+			if files_table and scraperwiki.sqlite.select("* FROM files WHERE file=?", [latest_file]):
+				continue
+
 			sock = urllib.urlopen('ftp://{url}{path}/{file}'.format(url=FTP_URL, path=path, file=latest_file))
-			extract_data(io.BytesIO(sock.read()), election_id)
+			extract_data(latest_file, io.BytesIO(sock.read()), election_id)
